@@ -65,7 +65,8 @@ if(KERFNEST_BUILD_TESTS)
         tests/Checker.cpp
         tests/CheckerTests.cpp
         tests/SolverTests.cpp
-        tests/SearchTests.cpp)
+        tests/SearchTests.cpp
+        tests/FuzzTests.cpp)
     target_include_directories(kerfnest_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(kerfnest_tests PRIVATE kerfnest Clipper2 doctest::doctest)
     add_test(NAME kerfnest_tests COMMAND kerfnest_tests)
