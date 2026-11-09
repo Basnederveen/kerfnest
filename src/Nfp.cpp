@@ -1,7 +1,7 @@
 #include "Nfp.h"
 
 #include <map>
-#include <optional>
+#include <algorithm>
 #include <stdexcept>
 
 using namespace Clipper2Lib;
@@ -115,34 +115,21 @@ Paths64 ConvolutionSum(const Path64& rawA, const Path64& rawB)
     return Union(cycles, FillRule::NonZero);
 }
 
-/// Depth a probe point keeps from a piece's edges. Edge vertices are rounded intersections and
-/// can sit a unit off the true edge; a probe on them could land on the wrong side.
-constexpr int64_t kProbeDepthUnits = 2;
-
-/// A point strictly inside the piece (outer with its holes), or none for a sliver thinner than
-/// twice the probe depth: such a piece is dropped, which only loses positions.
-std::optional<Point64> ProbePoint(const Paths64& piece)
+/// A height strictly between the hole's lowest and highest vertex that no vertex has: a
+/// horizontal cut there crosses the hole's interior and touches no vertex.
+int64_t CutHeight(const Path64& hole)
 {
-    for (const Path64& p : InflatePaths(piece, -static_cast<double>(kProbeDepthUnits), JoinType::Miter, EndType::Polygon))
-        if (Area(p) > 0)
-            return p.front();
-    return std::nullopt;
-}
-
-/// Keeps every piece of the tree (outer with its holes) whose probe point passes the test.
-template <typename Test>
-void CollectPieces(const PolyPath64& node, const Test& inside, Paths64& out)
-{
-    for (const auto& outer : node) {
-        Paths64 piece{outer->Polygon()};
-        for (const auto& hole : *outer)
-            piece.push_back(hole->Polygon());
-        const std::optional<Point64> probe = ProbePoint(piece);
-        if (probe && inside(*probe))
-            out.insert(out.end(), piece.begin(), piece.end());
-        for (const auto& hole : *outer)
-            CollectPieces(*hole, inside, out);
-    }
+    std::vector<int64_t> ys;
+    for (const Point64& p : hole)
+        ys.push_back(p.y);
+    std::sort(ys.begin(), ys.end());
+    ys.erase(std::unique(ys.begin(), ys.end()), ys.end());
+    const size_t mid = ys.size() / 2;
+    for (size_t d = 0; d < ys.size(); ++d)
+        for (const size_t i : {mid + d, mid - d - 1})
+            if (i + 1 < ys.size() && ys[i + 1] - ys[i] >= 2)
+                return ys[i] + (ys[i + 1] - ys[i]) / 2;
+    throw std::logic_error("hole fit: no cut height between the hole's vertices");
 }
 
 } // namespace
@@ -155,21 +142,22 @@ Paths64 InnerFitInHole(const Path64& hole, const Path64& b)
     if (range.left > range.right || range.top > range.bottom)
         return {};
 
-    // Within range, B + t stays inside the hole's bounds. Its boundary meets the hole's only on
-    // the ring; between the ring's edges B + t is either inside the hole or not, all the way, so
-    // one point per piece decides the piece.
-    const Paths64 ring = MinkowskiSum(Negated(b), hole, true);
-    Clipper64 clipper;
-    clipper.AddSubject({range.AsPath()});
-    clipper.AddClip(ring);
-    PolyTree64 tree;
-    clipper.Execute(ClipType::Difference, FillRule::NonZero, tree);
-
-    Paths64 fit;
-    CollectPieces(tree, [&](const Point64 t) {
-        return Area(Difference(Paths64{TranslatePath(b, t.x, t.y)}, Paths64{hole}, FillRule::NonZero)) == 0.0;
-    }, fit);
-    return fit;
+    // Within range, B + t stays inside the hole's bounds, so B is outside the hole exactly where it
+    // overlaps the material around it: a frame minus the hole. The frame is not simply connected;
+    // cut across the hole, each piece is, and the convolution sums them exactly.
+    const Rect64 frame(hb.left - 2, hb.top - 2, hb.right + 2, hb.bottom + 2);
+    const Paths64 material = Difference(Paths64{frame.AsPath()}, Paths64{hole}, FillRule::NonZero);
+    const int64_t cut = CutHeight(hole);
+    const Path64 negB = Negated(b);
+    Paths64 blocked;
+    for (const Rect64& half : {Rect64(frame.left, frame.top, frame.right, cut), Rect64(frame.left, cut, frame.right, frame.bottom)})
+        for (const Path64& piece : Intersect(material, Paths64{half.AsPath()}, FillRule::NonZero)) {
+            if (!IsPositive(piece))
+                throw std::logic_error("hole fit: a piece of the cut frame has a hole");
+            for (Path64& p : ConvolutionSum(piece, negB))
+                blocked.push_back(std::move(p));
+        }
+    return Difference(Paths64{range.AsPath()}, blocked, FillRule::NonZero);
 }
 
 Paths64 NoFitPolygon(const OrientedShape& a, const OrientedShape& b)

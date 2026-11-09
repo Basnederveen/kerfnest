@@ -3,6 +3,7 @@
 #include "Nfp.h"
 
 #include <algorithm>
+#include <memory>
 #include <tuple>
 #include <utility>
 
@@ -109,18 +110,19 @@ SheetFill::SheetFill(const Instance& instance, NfpCache& nfps, const int sheetTy
 
 const Paths64& SheetFill::ForbiddenFor(const int part, const int angle, uint64_t& work)
 {
-    Forbidden& f = forbidden_[{part, angle}];
-    if (f.covered < placed_.size()) {
-        Paths64 all = std::move(f.region);
-        for (; f.covered < placed_.size(); ++f.covered) {
-            const Placed& p = placed_[f.covered];
+    std::shared_ptr<const Forbidden>& f = forbidden_[{part, angle}];
+    if (!f || f->covered < placed_.size()) {
+        // Copies of this sheet (the fill's beam) may share the old region: build a new one.
+        Paths64 all = f ? f->region : Paths64{};
+        for (size_t k = f ? f->covered : 0; k < placed_.size(); ++k) {
+            const Placed& p = placed_[k];
             for (const Path64& path : nfps_.Get(p.part, p.angle, part, angle))
                 all.push_back(TranslatePath(path, p.pos.x, p.pos.y));
         }
         work += Vertices(all);
-        f.region = Union(all, FillRule::NonZero);
+        f = std::make_shared<const Forbidden>(Forbidden{Union(all, FillRule::NonZero), placed_.size()});
     }
-    return f.region;
+    return f->region;
 }
 
 std::vector<Placed> SheetFill::BestPositions(const int part, const size_t count, uint64_t& work)
@@ -142,8 +144,9 @@ std::vector<Placed> SheetFill::BestPositions(const int part, const size_t count,
             continue;
 
         const Paths64& forbidden = ForbiddenFor(part, angle, work);
-        work += Vertices(forbidden) + 4;
-        for (const Candidate& c : Candidates(range, forbidden)) {
+        const std::vector<Candidate> candidates = Candidates(range, forbidden);
+        work += Vertices(forbidden) + 4 + candidates.size() * (1 + holeBounds_.size());
+        for (const Candidate& c : candidates) {
             const Rect64 placedTrue = Shifted(tb, c.pos);
             const Rect64 placedInflated = Shifted(shape.bounds, c.pos);
             const bool inHole = std::any_of(holeBounds_.begin(), holeBounds_.end(),

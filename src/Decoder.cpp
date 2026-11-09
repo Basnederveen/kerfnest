@@ -20,6 +20,7 @@ SheetFill Fill(const Instance& instance, NfpCache& nfps, const int sheetType, co
     struct State {
         SheetFill fill;
         std::set<int> failed; ///< free space only shrinks: a part that did not fit never will
+        std::optional<std::pair<int, std::vector<Placed>>> lookahead; ///< positions found for the next piece
     };
     std::vector<State> beam{{SheetFill(instance, nfps, sheetType), {}}};
     for (size_t k = 0; k < remaining.size(); ++k) {
@@ -30,7 +31,10 @@ SheetFill Fill(const Instance& instance, NfpCache& nfps, const int sheetType, co
                 next.push_back(std::move(s));
                 continue;
             }
-            const std::vector<Placed> positions = s.fill.BestPositions(part, kFillBranching, work);
+            const std::vector<Placed> positions = s.lookahead && s.lookahead->first == part
+                                                      ? std::move(s.lookahead->second)
+                                                      : s.fill.BestPositions(part, kFillBranching, work);
+            s.lookahead.reset();
             if (positions.empty()) {
                 s.failed.insert(part);
                 next.push_back(std::move(s));
@@ -46,11 +50,16 @@ SheetFill Fill(const Instance& instance, NfpCache& nfps, const int sheetType, co
         }
         // One step of lookahead: a partial sheet on which the next piece still fits beats one where
         // the locally tightest spot (a disc in the valley between two others) blocked it.
+        // The positions found are kept: a surviving partial sheet places the next piece from them.
         std::vector<bool> nextFits(next.size(), false);
         if (next.size() > 1 && k + 1 < remaining.size())
-            for (size_t i = 0; i < next.size(); ++i)
-                nextFits[i] = !next[i].failed.count(remaining[k + 1]) &&
-                              !next[i].fill.BestPositions(remaining[k + 1], 1, work).empty();
+            for (size_t i = 0; i < next.size(); ++i) {
+                const int nextPart = remaining[k + 1];
+                if (next[i].failed.count(nextPart))
+                    continue;
+                next[i].lookahead.emplace(nextPart, next[i].fill.BestPositions(nextPart, kFillBranching, work));
+                nextFits[i] = !next[i].lookahead->second.empty();
+            }
         std::vector<size_t> rank(next.size());
         std::iota(rank.begin(), rank.end(), 0);
         std::stable_sort(rank.begin(), rank.end(), [&](const size_t a, const size_t b) {
@@ -69,20 +78,35 @@ SheetFill Fill(const Instance& instance, NfpCache& nfps, const int sheetType, co
 
 bool TakesAll(const SheetFill& fill, const std::vector<int>& remaining) { return fill.placed().size() == remaining.size(); }
 
+/// A fill depends only on its sheet type and the remaining pieces: the sheet-size policies of one
+/// decode often fill the same sheet from the same pieces.
+SheetFill FillOnce(const Instance& instance, NfpCache& nfps, const int sheetType, const std::vector<int>& remaining,
+                   uint64_t& work, FillMemo* memo)
+{
+    if (!memo)
+        return Fill(instance, nfps, sheetType, remaining, work);
+    const auto key = std::make_pair(sheetType, remaining);
+    auto it = memo->find(key);
+    if (it == memo->end())
+        it = memo->emplace(key, Fill(instance, nfps, sheetType, remaining, work)).first;
+    return it->second;
+}
+
 /// The next sheet under a sheet-size policy.
-SheetFill NextSheet(const Instance& instance, NfpCache& nfps, const int policy, const std::vector<int>& remaining, uint64_t& work)
+SheetFill NextSheet(const Instance& instance, NfpCache& nfps, const int policy, const std::vector<int>& remaining,
+                    uint64_t& work, FillMemo* memo)
 {
     const int types = static_cast<int>(instance.usable.size());
     std::vector<SheetFill> fills;
     if (policy != kMixedSizes) {
-        fills.push_back(Fill(instance, nfps, policy, remaining, work));
+        fills.push_back(FillOnce(instance, nfps, policy, remaining, work, memo));
         if (fills.back().placed().empty()) // parts only another size holds
             fills.clear();
     }
     if (fills.empty() || TakesAll(fills.front(), remaining))
         for (int type = 0; type < types; ++type)
             if (type != policy)
-                fills.push_back(Fill(instance, nfps, type, remaining, work));
+                fills.push_back(FillOnce(instance, nfps, type, remaining, work, memo));
 
     const auto area = [&](const SheetFill& f) { return instance.sheetAreaMm2[f.sheetType()]; };
     std::optional<size_t> best;
@@ -132,13 +156,13 @@ Objective Evaluate(const Instance& instance, const std::vector<SheetFill>& sheet
 }
 
 std::optional<Decoded> DecodeWith(const Instance& instance, NfpCache& nfps, const std::vector<int>& pieces,
-                                  const int policy, const uint64_t cap, uint64_t& work, size_t* placedAtCap)
+                                  const int policy, const uint64_t cap, uint64_t& work, size_t* placedAtCap, FillMemo* memo)
 {
     Decoded d;
     d.policy = policy;
     std::vector<int> remaining = pieces;
     while (!remaining.empty()) {
-        SheetFill sheet = NextSheet(instance, nfps, policy, remaining, work);
+        SheetFill sheet = NextSheet(instance, nfps, policy, remaining, work, memo);
         // Copies of a part are interchangeable: consume the first remaining ones.
         std::vector<int> placedCount(instance.shapes.size(), 0);
         for (const Placed& p : sheet.placed())
@@ -165,9 +189,10 @@ std::optional<Decoded> DecodeWith(const Instance& instance, NfpCache& nfps, cons
 Decoded Decode(const Instance& instance, NfpCache& nfps, const std::vector<int>& order, const uint64_t cap, uint64_t& work)
 {
     std::optional<Decoded> best;
+    FillMemo memo;
     for (int policy = kMixedSizes; policy < static_cast<int>(instance.usable.size()); ++policy) {
         size_t placed = 0;
-        std::optional<Decoded> d = DecodeWith(instance, nfps, order, policy, cap, work, &placed);
+        std::optional<Decoded> d = DecodeWith(instance, nfps, order, policy, cap, work, &placed, &memo);
         if (!d) {
             if (best)
                 break; // a complete nest is in hand; the other policies are out of budget

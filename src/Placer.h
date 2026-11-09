@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -73,7 +74,7 @@ private:
     int64_t usedLength_;
     std::vector<Placed> placed_;
     std::vector<Clipper2Lib::Rect64> holeBounds_; ///< of the placed parts' holes, on the sheet
-    std::map<std::pair<int, int>, Forbidden> forbidden_;
+    std::map<std::pair<int, int>, std::shared_ptr<const Forbidden>> forbidden_; ///< shared with copies of this sheet
     double netAreaMm2_ = 0.0;
 };
 

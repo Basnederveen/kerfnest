@@ -3,7 +3,9 @@
 #include "Placer.h"
 
 #include <cstdint>
+#include <map>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace kerfnest {
@@ -42,8 +44,11 @@ Objective Evaluate(const Instance& instance, const std::vector<SheetFill>& sheet
 /// that fits. Every piece must fit an empty sheet of some type (the caller checks this first).
 /// Adds the work done to `work`. With a cap (0: none), gives up when the work passes it after a
 /// sheet while pieces are left, reporting how many were placed.
+/// Fills already made in this decode, per (sheet type, remaining pieces).
+using FillMemo = std::map<std::pair<int, std::vector<int>>, SheetFill>;
+
 std::optional<Decoded> DecodeWith(const Instance& instance, NfpCache& nfps, const std::vector<int>& pieces, int policy,
-                                  uint64_t cap, uint64_t& work, size_t* placedAtCap = nullptr);
+                                  uint64_t cap, uint64_t& work, size_t* placedAtCap = nullptr, FillMemo* memo = nullptr);
 
 /// Every policy, the best objective wins; the cap counts the work of all of them. Once one policy
 /// is complete, running out of budget only ends the policy loop; with none complete it is a
