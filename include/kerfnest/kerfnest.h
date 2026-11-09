@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <variant>
 #include <vector>
 
 // kerfnest: deterministic 2D irregular nesting of sheet-metal parts on stock sheets.
@@ -75,5 +76,18 @@ struct Refusal {
     RefusalCode code = RefusalCode::InvalidContour;
     std::string message;
 };
+
+/// Every copy of every part placed. sheetTypeIds[i] is the stock size of sheet i.
+struct Solution {
+    std::vector<std::string> sheetTypeIds;
+    std::vector<Placement> placements;
+};
+
+using Result = std::variant<Solution, Refusal>;
+
+/// Nests every part on the least total sheet area, or refuses. Deterministic: the same input
+/// gives the same result. Throws std::invalid_argument for a malformed problem (no sheet types,
+/// no allowed angles, negative spacing or margin).
+Result Solve(const Problem& problem);
 
 } // namespace kerfnest

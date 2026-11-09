@@ -36,9 +36,12 @@ Rotation RotationFor(const int angleDeg)
     }
 }
 
+Point Rotated(const Point p, const Rotation r) { return {p.x * r.c - p.y * r.s, p.x * r.s + p.y * r.c}; }
+
 Point64 ToUnits(const Point p, const Rotation r)
 {
-    return {RoundUnits(p.x * r.c - p.y * r.s), RoundUnits(p.x * r.s + p.y * r.c)};
+    const Point q = Rotated(p, r);
+    return {RoundUnits(q.x), RoundUnits(q.y)};
 }
 
 double Radius(const Point p, const Point c) { return std::hypot(p.x - c.x, p.y - c.y); }
@@ -152,7 +155,44 @@ Paths64 Offset(const Paths64& paths, const int64_t delta)
     return InflatePaths(paths, static_cast<double>(delta), JoinType::Miter, EndType::Polygon, kMiterLimit);
 }
 
+/// Exact bounds of the loop rotated by angleDeg (arcs through their extreme points), in units
+/// rounded outward.
+Rect64 TrueBounds(const Loop& loop, const int angleDeg)
+{
+    const Rotation rot = RotationFor(angleDeg);
+    double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
+    const auto include = [&](const Point p) {
+        minX = std::min(minX, p.x), minY = std::min(minY, p.y);
+        maxX = std::max(maxX, p.x), maxY = std::max(maxY, p.y);
+    };
+    for (const Segment& s : loop) {
+        include(Rotated(s.start, rot));
+        if (s.type == SegmentType::Line)
+            continue;
+        const Point c = Rotated(s.center, rot);
+        const Point start = Rotated(s.start, rot);
+        const double r = Radius(start, c);
+        const double th = Sweep(s);
+        const double a0 = std::atan2(start.y - c.y, start.x - c.x);
+        for (int k = 0; k < 4; ++k) {
+            const double a = k * kPi / 2;
+            const double along = th > 0 ? std::fmod(a - a0 + 4 * kPi, 2 * kPi) : std::fmod(a0 - a + 4 * kPi, 2 * kPi);
+            if (along <= std::abs(th))
+                include({c.x + r * std::cos(a), c.y + r * std::sin(a)});
+        }
+    }
+    return Rect64(FloorUnits(minX), FloorUnits(minY), CeilUnits(maxX), CeilUnits(maxY));
+}
+
 } // namespace
+
+double NetAreaMm2(const Part& part)
+{
+    double area = std::abs(LoopArea(part.loops.front()));
+    for (size_t i = 1; i < part.loops.size(); ++i)
+        area -= std::abs(LoopArea(part.loops[i]));
+    return area;
+}
 
 Path64 PolygoniseLoop(const Loop& loop, const int angleDeg, const Fit fit)
 {
@@ -221,6 +261,7 @@ OrientedShape BuildOrientedShape(const Part& part, const int angleDeg, const dou
         shape.holes.push_back(std::move(p));
 
     shape.bounds = GetBounds(shape.outer);
+    shape.trueBounds = TrueBounds(part.loops.front(), angleDeg);
     return shape;
 }
 

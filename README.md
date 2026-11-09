@@ -12,7 +12,7 @@ holes of large ones.
   budget is a typed refusal, never a partial nest.
 - **Rotation only.** Allowed angles are whole degrees; parts are never mirrored.
 
-Status: under construction.
+Status: under construction. Constructive nesting works (sheet-by-sheet beam fill over no-fit polygons); the improvement search is next.
 
 ## Build
 

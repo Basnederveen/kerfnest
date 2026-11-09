@@ -38,8 +38,12 @@ struct OrientedShape {
     int angleDeg = 0;
     Clipper2Lib::Path64 outer;
     Clipper2Lib::Paths64 holes;
-    Clipper2Lib::Rect64 bounds;
+    Clipper2Lib::Rect64 bounds;     ///< of the inflated outer
+    Clipper2Lib::Rect64 trueBounds; ///< of the true contour, rounded outward: sheet-edge fits stay exact
 };
+
+/// Material area of the true contour: outer minus holes, arcs exact.
+double NetAreaMm2(const Part& part);
 
 /// Expects a part that passed ValidateLoops.
 OrientedShape BuildOrientedShape(const Part& part, int angleDeg, double spacingMm);
