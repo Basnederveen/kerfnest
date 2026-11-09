@@ -93,6 +93,24 @@ TEST_CASE("Search: stops after a long run without improvement, whatever the budg
     Solved(Mixed(1'000'000'000'000'000));
 }
 
+TEST_CASE("Search: a complete first pass is never refused; a refusal always has pieces left")
+{
+    // The smallest budget that gives a nest...
+    uint64_t lo = 1, hi = 50'000'000;
+    while (lo < hi) {
+        const uint64_t mid = lo + (hi - lo) / 2;
+        if (std::holds_alternative<Refusal>(Solve(Mixed(mid))))
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    // ...and just below it the refusal names pieces that were not placed: a pass that placed
+    // everything is a nest, even when later sheet-size policies run out of budget.
+    const Result r = Solve(Mixed(lo - 1));
+    REQUIRE(std::holds_alternative<Refusal>(r));
+    CHECK(std::get<Refusal>(r).message.find("placing 23 of 23") == std::string::npos);
+}
+
 TEST_CASE("Search: a constructive pass larger than the work budget is refused as incomplete")
 {
     const Result r = Solve(Mixed(1));

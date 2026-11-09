@@ -131,8 +131,8 @@ Objective Evaluate(const Instance& instance, const std::vector<SheetFill>& sheet
     return o;
 }
 
-Decoded DecodeWith(const Instance& instance, NfpCache& nfps, const std::vector<int>& pieces, const int policy,
-                   const uint64_t cap, uint64_t& work)
+std::optional<Decoded> DecodeWith(const Instance& instance, NfpCache& nfps, const std::vector<int>& pieces,
+                                  const int policy, const uint64_t cap, uint64_t& work, size_t* placedAtCap)
 {
     Decoded d;
     d.policy = policy;
@@ -153,11 +153,11 @@ Decoded DecodeWith(const Instance& instance, NfpCache& nfps, const std::vector<i
         d.remainingAt.push_back(std::move(remaining));
         d.sheets.push_back(std::move(sheet));
         remaining = std::move(next);
-        if (cap != 0 && work > cap)
-            throw RefusalError(RefusalCode::NestIncomplete,
-                               "the work budget of " + std::to_string(cap) + " units ran out after placing " +
-                                   std::to_string(pieces.size() - remaining.size()) + " of " +
-                                   std::to_string(pieces.size()) + " pieces in the first pass; raise the budget");
+        if (cap != 0 && work > cap && !remaining.empty()) {
+            if (placedAtCap)
+                *placedAtCap = pieces.size() - remaining.size();
+            return std::nullopt;
+        }
     }
     return d;
 }
@@ -166,9 +166,18 @@ Decoded Decode(const Instance& instance, NfpCache& nfps, const std::vector<int>&
 {
     std::optional<Decoded> best;
     for (int policy = kMixedSizes; policy < static_cast<int>(instance.usable.size()); ++policy) {
-        Decoded d = DecodeWith(instance, nfps, order, policy, cap, work);
-        if (!best || Evaluate(instance, d.sheets) < Evaluate(instance, best->sheets))
-            best.emplace(std::move(d));
+        size_t placed = 0;
+        std::optional<Decoded> d = DecodeWith(instance, nfps, order, policy, cap, work, &placed);
+        if (!d) {
+            if (best)
+                break; // a complete nest is in hand; the other policies are out of budget
+            throw RefusalError(RefusalCode::NestIncomplete,
+                               "the work budget of " + std::to_string(cap) + " units ran out after placing " +
+                                   std::to_string(placed) + " of " + std::to_string(order.size()) +
+                                   " pieces in the first pass; raise the budget");
+        }
+        if (!best || Evaluate(instance, d->sheets) < Evaluate(instance, best->sheets))
+            best = std::move(d);
         if (instance.usable.size() == 1)
             break; // one size: the fixed policy is the mixed one
     }

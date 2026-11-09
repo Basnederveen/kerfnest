@@ -98,7 +98,7 @@ Neighbour MakeNeighbour(const Instance& instance, NfpCache& nfps, const Decoded&
     // One in four also tries another sheet-size policy from this sheet on.
     const int types = static_cast<int>(instance.usable.size());
     const int policy = rng.Below(4) == 0 ? static_cast<int>(rng.Below(static_cast<size_t>(types) + 1)) - 1 : current.policy;
-    nb.tail = DecodeWith(instance, nfps, seq, policy, 0, nb.work);
+    nb.tail = *DecodeWith(instance, nfps, seq, policy, 0, nb.work); // no cap: always complete
     return nb;
 }
 
