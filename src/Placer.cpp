@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <tuple>
+#include <utility>
 
 using namespace Clipper2Lib;
 
@@ -74,15 +75,28 @@ bool Contains(const Rect64& outer, const Rect64& inner)
 
 Rect64 Shifted(const Rect64& r, const Point64 t) { return Rect64(r.left + t.x, r.top + t.y, r.right + t.x, r.bottom + t.y); }
 
+uint64_t Vertices(const Paths64& paths)
+{
+    uint64_t n = 0;
+    for (const Path64& p : paths)
+        n += p.size();
+    return n;
+}
+
 } // namespace
 
 const Paths64& NfpCache::Get(const int partA, const int angleA, const int partB, const int angleB)
 {
     const std::array<int, 4> key{partA, angleA, partB, angleB};
-    auto it = nfps_.find(key);
-    if (it == nfps_.end())
-        it = nfps_.emplace(key, NoFitPolygon(instance_.shapes[partA][angleA], instance_.shapes[partB][angleB])).first;
-    return it->second;
+    {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        const auto it = nfps_.find(key);
+        if (it != nfps_.end())
+            return it->second;
+    }
+    Paths64 nfp = NoFitPolygon(instance_.shapes[partA][angleA], instance_.shapes[partB][angleB]);
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return nfps_.emplace(key, std::move(nfp)).first->second; // a thread that was first keeps its copy
 }
 
 SheetFill::SheetFill(const Instance& instance, NfpCache& nfps, const int sheetType)
@@ -93,7 +107,7 @@ SheetFill::SheetFill(const Instance& instance, NfpCache& nfps, const int sheetTy
     usedLength_ = lengthAlongX_ ? u.left : u.top;
 }
 
-const Paths64& SheetFill::ForbiddenFor(const int part, const int angle)
+const Paths64& SheetFill::ForbiddenFor(const int part, const int angle, uint64_t& work)
 {
     Forbidden& f = forbidden_[{part, angle}];
     if (f.covered < placed_.size()) {
@@ -103,12 +117,13 @@ const Paths64& SheetFill::ForbiddenFor(const int part, const int angle)
             for (const Path64& path : nfps_.Get(p.part, p.angle, part, angle))
                 all.push_back(TranslatePath(path, p.pos.x, p.pos.y));
         }
+        work += Vertices(all);
         f.region = Union(all, FillRule::NonZero);
     }
     return f.region;
 }
 
-std::vector<Placed> SheetFill::BestPositions(const int part, const size_t count)
+std::vector<Placed> SheetFill::BestPositions(const int part, const size_t count, uint64_t& work)
 {
     using Score = std::tuple<bool, int64_t, int64_t, int64_t, int>;
     struct Option {
@@ -126,7 +141,9 @@ std::vector<Placed> SheetFill::BestPositions(const int part, const size_t count)
         if (range.left > range.right || range.top > range.bottom)
             continue;
 
-        for (const Candidate& c : Candidates(range, ForbiddenFor(part, angle))) {
+        const Paths64& forbidden = ForbiddenFor(part, angle, work);
+        work += Vertices(forbidden) + 4;
+        for (const Candidate& c : Candidates(range, forbidden)) {
             const Rect64 placedTrue = Shifted(tb, c.pos);
             const Rect64 placedInflated = Shifted(shape.bounds, c.pos);
             const bool inHole = std::any_of(holeBounds_.begin(), holeBounds_.end(),

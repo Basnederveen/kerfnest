@@ -5,7 +5,9 @@
 #include <clipper2/clipper.h>
 
 #include <array>
+#include <cstdint>
 #include <map>
+#include <mutex>
 #include <vector>
 
 namespace kerfnest {
@@ -18,7 +20,9 @@ struct Instance {
     std::vector<double> sheetAreaMm2;               ///< [sheet type]
 };
 
-/// No-fit polygons per (part A, angle A, part B, angle B), computed on first use.
+/// No-fit polygons per (part A, angle A, part B, angle B), computed on first use. Shared by the
+/// search threads; a no-fit polygon is a pure function of its key, so who computes it first
+/// never changes a result.
 class NfpCache {
 public:
     explicit NfpCache(const Instance& instance) : instance_(instance) {}
@@ -26,7 +30,8 @@ public:
 
 private:
     const Instance& instance_;
-    std::map<std::array<int, 4>, Clipper2Lib::Paths64> nfps_;
+    std::mutex mutex_;
+    std::map<std::array<int, 4>, Clipper2Lib::Paths64> nfps_; ///< map nodes never move: references stay valid
 };
 
 struct Placed {
@@ -42,8 +47,10 @@ class SheetFill {
 public:
     SheetFill(const Instance& instance, NfpCache& nfps, int sheetType);
 
-    /// Up to `count` positions for the part, best first; empty when it fits nowhere.
-    std::vector<Placed> BestPositions(int part, size_t count);
+    /// Up to `count` positions for the part, best first; empty when it fits nowhere. Adds the
+    /// vertices it feeds to Clipper to `work`: deterministic, unlike time, and independent of
+    /// which no-fit polygons happen to be cached already.
+    std::vector<Placed> BestPositions(int part, size_t count, uint64_t& work);
 
     void Place(const Placed& p);
 
@@ -57,7 +64,7 @@ private:
         Clipper2Lib::Paths64 region; ///< union of the NFPs of placed_[0 .. covered)
         size_t covered = 0;
     };
-    const Clipper2Lib::Paths64& ForbiddenFor(int part, int angle);
+    const Clipper2Lib::Paths64& ForbiddenFor(int part, int angle, uint64_t& work);
 
     const Instance& instance_;
     NfpCache& nfps_;

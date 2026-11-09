@@ -1,6 +1,7 @@
 #include <kerfnest/kerfnest.h>
 
 #include "Decoder.h"
+#include "Search.h"
 #include "Refusal.h"
 #include "Shape.h"
 #include "Units.h"
@@ -107,7 +108,11 @@ Result Solve(const Problem& problem)
         const Instance in = Prepare(problem);
         CheckEveryPartFits(problem, in);
         NfpCache nfps(in);
-        const std::vector<SheetFill> sheets = Decode(in, nfps, InitialOrder(problem, in));
+        uint64_t work = 0;
+        Decoded first = Decode(in, nfps, InitialOrder(problem, in), problem.settings.workBudget, work);
+        const std::vector<SheetFill> sheets = work < problem.settings.workBudget
+                                                  ? Search(in, nfps, std::move(first), problem.settings, work)
+                                                  : std::move(first.sheets);
 
         Solution solution;
         for (size_t i = 0; i < sheets.size(); ++i) {

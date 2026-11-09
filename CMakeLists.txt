@@ -26,6 +26,7 @@ add_library(kerfnest STATIC
     src/Nfp.cpp
     src/Placer.cpp
     src/Decoder.cpp
+    src/Search.cpp
     src/Solve.cpp)
 target_include_directories(kerfnest
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -63,7 +64,8 @@ if(KERFNEST_BUILD_TESTS)
         tests/NfpTests.cpp
         tests/Checker.cpp
         tests/CheckerTests.cpp
-        tests/SolverTests.cpp)
+        tests/SolverTests.cpp
+        tests/SearchTests.cpp)
     target_include_directories(kerfnest_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(kerfnest_tests PRIVATE kerfnest Clipper2 doctest::doctest)
     add_test(NAME kerfnest_tests COMMAND kerfnest_tests)

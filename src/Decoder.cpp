@@ -1,21 +1,21 @@
 #include "Decoder.h"
 
+#include "Refusal.h"
+
 #include <algorithm>
 #include <numeric>
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
 
 namespace kerfnest {
 namespace {
 
-/// A per-sheet choice by utilisation instead of one fixed sheet type.
-constexpr int kMixedSizes = -1;
-
 /// Fills one sheet with a small beam: each partial sheet branches on its best positions for the
-/// next piece, and the best partial sheets survive (more placed area, then shorter used length,
-/// then the order they were made in).
-SheetFill Fill(const Instance& instance, NfpCache& nfps, const int sheetType, const std::vector<int>& remaining)
+/// next piece, and the best partial sheets survive (more placed area, then whether the next
+/// piece still fits, then shorter used length, then the order they were made in).
+SheetFill Fill(const Instance& instance, NfpCache& nfps, const int sheetType, const std::vector<int>& remaining, uint64_t& work)
 {
     struct State {
         SheetFill fill;
@@ -30,7 +30,7 @@ SheetFill Fill(const Instance& instance, NfpCache& nfps, const int sheetType, co
                 next.push_back(std::move(s));
                 continue;
             }
-            const std::vector<Placed> positions = s.fill.BestPositions(part, kFillBranching);
+            const std::vector<Placed> positions = s.fill.BestPositions(part, kFillBranching, work);
             if (positions.empty()) {
                 s.failed.insert(part);
                 next.push_back(std::move(s));
@@ -49,7 +49,8 @@ SheetFill Fill(const Instance& instance, NfpCache& nfps, const int sheetType, co
         std::vector<bool> nextFits(next.size(), false);
         if (next.size() > 1 && k + 1 < remaining.size())
             for (size_t i = 0; i < next.size(); ++i)
-                nextFits[i] = !next[i].failed.count(remaining[k + 1]) && !next[i].fill.BestPositions(remaining[k + 1], 1).empty();
+                nextFits[i] = !next[i].failed.count(remaining[k + 1]) &&
+                              !next[i].fill.BestPositions(remaining[k + 1], 1, work).empty();
         std::vector<size_t> rank(next.size());
         std::iota(rank.begin(), rank.end(), 0);
         std::stable_sort(rank.begin(), rank.end(), [&](const size_t a, const size_t b) {
@@ -69,19 +70,19 @@ SheetFill Fill(const Instance& instance, NfpCache& nfps, const int sheetType, co
 bool TakesAll(const SheetFill& fill, const std::vector<int>& remaining) { return fill.placed().size() == remaining.size(); }
 
 /// The next sheet under a sheet-size policy.
-SheetFill NextSheet(const Instance& instance, NfpCache& nfps, const int policy, const std::vector<int>& remaining)
+SheetFill NextSheet(const Instance& instance, NfpCache& nfps, const int policy, const std::vector<int>& remaining, uint64_t& work)
 {
     const int types = static_cast<int>(instance.usable.size());
     std::vector<SheetFill> fills;
     if (policy != kMixedSizes) {
-        fills.push_back(Fill(instance, nfps, policy, remaining));
+        fills.push_back(Fill(instance, nfps, policy, remaining, work));
         if (fills.back().placed().empty()) // parts only another size holds
             fills.clear();
     }
     if (fills.empty() || TakesAll(fills.front(), remaining))
         for (int type = 0; type < types; ++type)
             if (type != policy)
-                fills.push_back(Fill(instance, nfps, type, remaining));
+                fills.push_back(Fill(instance, nfps, type, remaining, work));
 
     const auto area = [&](const SheetFill& f) { return instance.sheetAreaMm2[f.sheetType()]; };
     std::optional<size_t> best;
@@ -115,12 +116,29 @@ SheetFill NextSheet(const Instance& instance, NfpCache& nfps, const int policy, 
     return std::move(fills[*best]);
 }
 
-std::vector<SheetFill> DecodeWith(const Instance& instance, NfpCache& nfps, const std::vector<int>& order, const int policy)
+} // namespace
+
+Objective Evaluate(const Instance& instance, const std::vector<SheetFill>& sheets)
 {
-    std::vector<SheetFill> sheets;
-    std::vector<int> remaining = order;
+    Objective o;
+    for (const SheetFill& s : sheets)
+        o.sheetAreaMm2 += instance.sheetAreaMm2[s.sheetType()];
+    const SheetFill& last = sheets.back();
+    const Clipper2Lib::Rect64& u = instance.usable[last.sheetType()];
+    const bool alongX = u.Width() >= u.Height();
+    const double used = static_cast<double>(last.usedLength() - (alongX ? u.left : u.top));
+    o.lastSheetUsedMm2 = used * static_cast<double>(alongX ? u.Height() : u.Width()) * 1e-6;
+    return o;
+}
+
+Decoded DecodeWith(const Instance& instance, NfpCache& nfps, const std::vector<int>& pieces, const int policy,
+                   const uint64_t cap, uint64_t& work)
+{
+    Decoded d;
+    d.policy = policy;
+    std::vector<int> remaining = pieces;
     while (!remaining.empty()) {
-        SheetFill sheet = NextSheet(instance, nfps, policy, remaining);
+        SheetFill sheet = NextSheet(instance, nfps, policy, remaining, work);
         // Copies of a part are interchangeable: consume the first remaining ones.
         std::vector<int> placedCount(instance.shapes.size(), 0);
         for (const Placed& p : sheet.placed())
@@ -132,28 +150,25 @@ std::vector<SheetFill> DecodeWith(const Instance& instance, NfpCache& nfps, cons
             else
                 next.push_back(part);
         }
+        d.remainingAt.push_back(std::move(remaining));
+        d.sheets.push_back(std::move(sheet));
         remaining = std::move(next);
-        sheets.push_back(std::move(sheet));
+        if (cap != 0 && work > cap)
+            throw RefusalError(RefusalCode::NestIncomplete,
+                               "the work budget of " + std::to_string(cap) + " units ran out after placing " +
+                                   std::to_string(pieces.size() - remaining.size()) + " of " +
+                                   std::to_string(pieces.size()) + " pieces in the first pass; raise the budget");
     }
-    return sheets;
+    return d;
 }
 
-} // namespace
-
-std::vector<SheetFill> Decode(const Instance& instance, NfpCache& nfps, const std::vector<int>& order)
+Decoded Decode(const Instance& instance, NfpCache& nfps, const std::vector<int>& order, const uint64_t cap, uint64_t& work)
 {
-    const auto totalArea = [&](const std::vector<SheetFill>& sheets) {
-        double a = 0.0;
-        for (const SheetFill& s : sheets)
-            a += instance.sheetAreaMm2[s.sheetType()];
-        return a;
-    };
-    std::optional<std::vector<SheetFill>> best;
+    std::optional<Decoded> best;
     for (int policy = kMixedSizes; policy < static_cast<int>(instance.usable.size()); ++policy) {
-        std::vector<SheetFill> sheets = DecodeWith(instance, nfps, order, policy);
-        if (!best || totalArea(sheets) < totalArea(*best) ||
-            (totalArea(sheets) == totalArea(*best) && sheets.back().usedLength() < best->back().usedLength()))
-            best.emplace(std::move(sheets));
+        Decoded d = DecodeWith(instance, nfps, order, policy, cap, work);
+        if (!best || Evaluate(instance, d.sheets) < Evaluate(instance, best->sheets))
+            best.emplace(std::move(d));
         if (instance.usable.size() == 1)
             break; // one size: the fixed policy is the mixed one
     }
