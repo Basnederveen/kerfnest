@@ -12,7 +12,8 @@ holes of large ones.
   budget is a typed refusal, never a partial nest.
 - **Rotation only.** Allowed angles are whole degrees; parts are never mirrored.
 
-Status: under construction. Constructive nesting works (sheet-by-sheet beam fill over no-fit polygons); the improvement search is next.
+Status: early. Sheet-by-sheet beam fill over no-fit polygons, then a deterministic local search on
+the part order and sheet sizes. Fill density on small sheet counts is the known weak spot.
 
 ## Build
 
@@ -22,8 +23,8 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-C++17. Dependencies are fetched by CMake at pinned commits: Clipper2 (BSL-1.0) and, for the
-tests, doctest (MIT).
+C++17. Dependencies are fetched by CMake at pinned versions: Clipper2 (BSL-1.0); for the tests,
+doctest (MIT); for `kerfnest-cli`, nlohmann/json (MIT).
 
 ## Licence
 
