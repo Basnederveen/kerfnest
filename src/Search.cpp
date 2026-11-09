@@ -95,7 +95,10 @@ Neighbour MakeNeighbour(const Instance& instance, NfpCache& nfps, const Decoded&
         }
         }
     }
-    nb.tail = DecodeWith(instance, nfps, seq, current.policy, 0, nb.work);
+    // One in four also tries another sheet-size policy from this sheet on.
+    const int types = static_cast<int>(instance.usable.size());
+    const int policy = rng.Below(4) == 0 ? static_cast<int>(rng.Below(static_cast<size_t>(types) + 1)) - 1 : current.policy;
+    nb.tail = DecodeWith(instance, nfps, seq, policy, 0, nb.work);
     return nb;
 }
 
@@ -103,7 +106,7 @@ Neighbour MakeNeighbour(const Instance& instance, NfpCache& nfps, const Decoded&
 Decoded Joined(const Decoded& current, Neighbour&& nb)
 {
     Decoded d;
-    d.policy = current.policy;
+    d.policy = nb.tail.policy;
     for (size_t k = 0; k < nb.from; ++k) {
         d.sheets.push_back(current.sheets[k]);
         d.remainingAt.push_back(current.remainingAt[k]);

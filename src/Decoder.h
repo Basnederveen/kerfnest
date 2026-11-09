@@ -9,8 +9,8 @@ namespace kerfnest {
 
 /// Width of the beam that fills one sheet, and the positions each partial sheet branches on.
 /// A greedy fill (1 x 1) takes the locally tightest spot even when it blocks the next part.
-inline constexpr size_t kFillBeamWidth = 2;
-inline constexpr size_t kFillBranching = 2;
+inline constexpr size_t kFillBeamWidth = 4;
+inline constexpr size_t kFillBranching = 3;
 
 /// Sheet-size policy: one fixed sheet type for every sheet, or kMixedSizes (per sheet the
 /// highest utilisation). Whenever a size takes every remaining piece, the smallest such size is
