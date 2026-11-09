@@ -64,4 +64,16 @@ struct Placement {
     int angleDeg = 0;
 };
 
+enum class RefusalCode {
+    InvalidContour,       ///< a loop is open, crosses itself, or a hole is not inside the outer loop
+    PartExceedsAllSheets, ///< a part fits no sheet at any allowed angle
+    NestIncomplete,       ///< the work budget ran out before every piece was placed
+};
+
+/// Why there is no nest. The message names what failed; there is never a partial result.
+struct Refusal {
+    RefusalCode code = RefusalCode::InvalidContour;
+    std::string message;
+};
+
 } // namespace kerfnest

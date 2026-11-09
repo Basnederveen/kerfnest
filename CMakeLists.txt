@@ -20,9 +20,17 @@ FetchContent_Declare(Clipper2
     SOURCE_SUBDIR CPP)
 FetchContent_MakeAvailable(Clipper2)
 
-add_library(kerfnest INTERFACE)
-target_include_directories(kerfnest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(kerfnest INTERFACE Clipper2)
+add_library(kerfnest STATIC
+    src/Shape.cpp)
+target_include_directories(kerfnest
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(kerfnest PUBLIC Clipper2)
+if(MSVC)
+    target_compile_options(kerfnest PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(kerfnest PRIVATE -Wall -Wextra -Wpedantic)
+endif()
 
 if(KERFNEST_BUILD_TESTS)
     FetchContent_Declare(doctest
@@ -34,7 +42,8 @@ if(KERFNEST_BUILD_TESTS)
     enable_testing()
     add_executable(kerfnest_tests
         tests/TestMain.cpp
-        tests/UnitsTests.cpp)
+        tests/UnitsTests.cpp
+        tests/ShapeTests.cpp)
     target_include_directories(kerfnest_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(kerfnest_tests PRIVATE kerfnest Clipper2 doctest::doctest)
     add_test(NAME kerfnest_tests COMMAND kerfnest_tests)
