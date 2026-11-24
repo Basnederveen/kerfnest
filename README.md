@@ -26,6 +26,32 @@ ctest --test-dir build -C Release --output-on-failure
 C++17. Dependencies are fetched by CMake at pinned versions: Clipper2 (BSL-1.0); for the tests,
 doctest (MIT); for `kerfnest-cli`, nlohmann/json (MIT).
 
+## Example
+
+[`examples/flange-and-washers.json`](examples/flange-and-washers.json): three 200×200 flanges
+with a Ø120 hole and eight Ø80 washers on one 1000×500 sheet, 5 mm spacing, 10 mm margin.
+
+```sh
+build/Release/kerfnest-cli examples/flange-and-washers.json result.json
+```
+
+Everything lands on one sheet, and three of the washers sit inside the flange holes:
+
+```json
+{
+ "placements": [
+  { "partId": "flange", "sheet": 0, "x": 10.0,    "y": 10.0,   "angleDeg": 0 },
+  { "partId": "washer", "sheet": 0, "x": 110.282, "y": 95.019, "angleDeg": 90 },
+  ...
+ ],
+ "sheetTypeIds": ["1000x500"]
+}
+```
+
+A placement is the part's own contour rotated about its origin by `angleDeg`, then moved by
+`(x, y)`. When there is no complete nest, the result is a refusal instead:
+`{"refusal": {"code": "part_exceeds_all_sheets", "message": "..."}}`.
+
 ## Licence
 
 Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).

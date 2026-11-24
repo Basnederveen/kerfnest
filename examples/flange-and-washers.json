@@ -1,0 +1,27 @@
+{
+  "settings": { "spacingMm": 5, "marginMm": 10, "anglesDeg": [0, 90], "seed": 1, "workBudget": 2000000 },
+  "sheetTypes": [ { "id": "1000x500", "width": 1000, "height": 500 } ],
+  "parts": [
+    {
+      "id": "flange",
+      "quantity": 3,
+      "loops": [
+        [
+          { "type": "line", "start": [0, 0],     "end": [200, 0] },
+          { "type": "line", "start": [200, 0],   "end": [200, 200] },
+          { "type": "line", "start": [200, 200], "end": [0, 200] },
+          { "type": "line", "start": [0, 200],   "end": [0, 0] }
+        ],
+        [ { "type": "circle", "start": [160, 100], "end": [160, 100], "center": [100, 100], "clockwise": true } ]
+      ]
+    },
+    {
+      "id": "washer",
+      "quantity": 8,
+      "loops": [
+        [ { "type": "circle", "start": [40, 0], "end": [40, 0], "center": [0, 0], "clockwise": false } ],
+        [ { "type": "circle", "start": [10, 0], "end": [10, 0], "center": [0, 0], "clockwise": true } ]
+      ]
+    }
+  ]
+}
